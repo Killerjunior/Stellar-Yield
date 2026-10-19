@@ -7,7 +7,12 @@ pub enum DataKey {
     Oracle,
     OptionCounter,
     Option(u32),
+    StorageVersion,
 }
+
+/// The current options storage layout version. Version zero is the legacy
+/// layout where this key is absent and positions are stored under `Option(id)`.
+pub const CURRENT_STORAGE_VERSION: u32 = 1;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -74,6 +79,21 @@ pub fn write_option_counter(e: &Env, counter: u32) {
     e.storage()
         .instance()
         .set(&DataKey::OptionCounter, &counter);
+    extend_instance_ttl_default(e);
+}
+
+pub fn read_storage_version(e: &Env) -> u32 {
+    extend_instance_ttl_default(e);
+    e.storage()
+        .instance()
+        .get(&DataKey::StorageVersion)
+        .unwrap_or(0)
+}
+
+pub fn write_storage_version(e: &Env, version: u32) {
+    e.storage()
+        .instance()
+        .set(&DataKey::StorageVersion, &version);
     extend_instance_ttl_default(e);
 }
 

@@ -10,8 +10,9 @@ mod tests;
 
 use math::black_scholes_call;
 use storage::{
-    has_admin, read_option, read_option_counter, write_admin, write_option, write_option_counter,
-    write_oracle, OptionData, OptionType,
+    has_admin, read_admin, read_option, read_option_counter, read_storage_version, write_admin,
+    write_option, write_option_counter, write_oracle, write_storage_version, OptionData,
+    OptionType, CURRENT_STORAGE_VERSION,
 };
 
 #[contracterror]
@@ -40,6 +41,21 @@ impl OptionsContract {
         }
         write_admin(&env, &admin);
         write_oracle(&env, &oracle);
+        Ok(())
+    }
+
+    /// Marks the current storage layout version. Existing option records stay
+    /// under the same persistent keys and remain readable without rewriting.
+    pub fn migrate(env: Env) -> Result<(), OptionsError> {
+        if !has_admin(&env) {
+            return Err(OptionsError::NotInitialized);
+        }
+        let admin = read_admin(&env);
+        admin.require_auth();
+
+        if read_storage_version(&env) < CURRENT_STORAGE_VERSION {
+            write_storage_version(&env, CURRENT_STORAGE_VERSION);
+        }
         Ok(())
     }
 

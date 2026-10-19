@@ -170,6 +170,72 @@ fn test_exercise() {
 }
 
 #[test]
+fn test_storage_migration_preserves_open_and_exercised_positions() {
+    let (env, client, _admin, _, underlying, quote) = setup_env();
+    let minter = Address::generate(&env);
+    let exerciser = Address::generate(&env);
+    mint_tokens(&env, &underlying, &minter, 20_000_000);
+    mint_tokens(&env, &quote, &exerciser, 200_000_000);
+
+    let open_id = client.mint(
+        &minter,
+        &OptionType::Call,
+        &underlying,
+        &quote,
+        &100_000_000_i128,
+        &1000u64,
+        &5_000_000_i128,
+    );
+    let exercised_id = client.mint(
+        &minter,
+        &OptionType::Call,
+        &underlying,
+        &quote,
+        &100_000_000_i128,
+        &1000u64,
+        &5_000_000_i128,
+    );
+    env.ledger().set_timestamp(1000);
+    client.exercise(&exerciser, &exercised_id);
+
+    // A pre-migration deployment has no version marker, but live positions are
+    // already persisted under Option(id) and must remain addressable.
+    assert_eq!(
+        env.as_contract(&client.address, || crate::storage::read_storage_version(
+            &env
+        )),
+        0
+    );
+    client.migrate();
+    assert_eq!(
+        env.as_contract(&client.address, || crate::storage::read_storage_version(
+            &env
+        )),
+        crate::storage::CURRENT_STORAGE_VERSION
+    );
+
+    let (open, exercised) = env.as_contract(&client.address, || {
+        (
+            crate::storage::read_option(&env, open_id),
+            crate::storage::read_option(&env, exercised_id),
+        )
+    });
+    assert!(!open.exercised);
+    assert!(!open.expired);
+    assert!(exercised.exercised);
+    assert!(!exercised.expired);
+    assert_eq!(open.minter, minter);
+    assert_eq!(exercised.collateral_amount, 5_000_000);
+
+    // Re-running migration is safe and does not alter either record.
+    client.migrate();
+    env.as_contract(&client.address, || {
+        assert_eq!(crate::storage::read_option(&env, open_id), open);
+        assert_eq!(crate::storage::read_option(&env, exercised_id), exercised);
+    });
+}
+
+#[test]
 fn test_storage_ttl_extension() {
     let (env, client, _, _, underlying, quote) = setup_env();
     let minter = Address::generate(&env);
