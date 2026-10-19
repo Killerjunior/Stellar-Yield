@@ -24,7 +24,8 @@ pub struct OptionData {
     pub underlying_asset: Address,
     pub quote_asset: Address,
     pub strike_price: i128,   // Scaled by 1e7
-    pub expiration_time: u64, // Unix timestamp
+    pub opening_time: u64,    // Unix timestamp — earliest ledger at which exercise is permitted
+    pub expiration_time: u64, // Unix timestamp — latest ledger at which exercise is permitted
     pub collateral_amount: i128,
     pub exercised: bool,
     pub expired: bool,

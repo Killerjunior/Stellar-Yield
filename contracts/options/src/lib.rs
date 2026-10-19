@@ -27,6 +27,12 @@ pub enum OptionsError {
     AlreadyExpired = 7,
     ZeroAmount = 8,
     InvalidPrice = 9,
+    /// Exercise attempted before the option's opening_time.
+    TooEarly = 10,
+    /// Exercise attempted after the option's expiration_time.
+    ExerciseWindowClosed = 11,
+    /// opening_time must be strictly before expiration_time.
+    InvalidExerciseWindow = 12,
 }
 
 #[contract]
@@ -50,6 +56,7 @@ impl OptionsContract {
         underlying_asset: Address,
         quote_asset: Address,
         strike_price: i128,
+        opening_time: u64,
         expiration_time: u64,
         collateral_amount: i128,
     ) -> Result<u32, OptionsError> {
@@ -59,6 +66,10 @@ impl OptionsContract {
         }
         if collateral_amount <= 0 {
             return Err(OptionsError::ZeroAmount);
+        }
+        // opening_time must be strictly before expiration_time
+        if opening_time >= expiration_time {
+            return Err(OptionsError::InvalidExerciseWindow);
         }
 
         let collateral_asset = match option_type {
@@ -79,6 +90,7 @@ impl OptionsContract {
             underlying_asset,
             quote_asset,
             strike_price,
+            opening_time,
             expiration_time,
             collateral_amount,
             exercised: false,
@@ -90,7 +102,7 @@ impl OptionsContract {
 
         env.events().publish(
             (symbol_short!("mint"), counter),
-            (minter, strike_price, expiration_time),
+            (minter, strike_price, opening_time, expiration_time),
         );
 
         Ok(counter)
@@ -100,13 +112,25 @@ impl OptionsContract {
         exerciser.require_auth();
         let mut option = read_option(&env, option_id);
 
-        if option.exercised || option.expired {
+        // Guard: prevent double-exercise (repeated exercise cannot pay twice)
+        if option.exercised {
             return Err(OptionsError::AlreadyExercised);
+        }
+        // Guard: expired options can no longer be exercised
+        if option.expired {
+            return Err(OptionsError::AlreadyExpired);
         }
 
         let current_time = env.ledger().timestamp();
-        if current_time < option.expiration_time {
-            return Err(OptionsError::NotExpired);
+
+        // Guard: too early — exercise window has not opened yet
+        if current_time < option.opening_time {
+            return Err(OptionsError::TooEarly);
+        }
+
+        // Guard: too late — exercise window has closed (past expiration_time)
+        if current_time > option.expiration_time {
+            return Err(OptionsError::ExerciseWindowClosed);
         }
 
         // For Call: exerciser pays strike_price * collateral_amount (scaled) of quote_asset, receives collateral_asset (underlying)
@@ -152,7 +176,8 @@ impl OptionsContract {
         }
 
         let current_time = env.ledger().timestamp();
-        if current_time < option.expiration_time {
+        // Expire is only callable after the exercise window closes
+        if current_time <= option.expiration_time {
             return Err(OptionsError::NotExpired);
         }
 
